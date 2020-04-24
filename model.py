@@ -58,11 +58,11 @@ class MSNet(tf.keras.Model):
 
         self.up_block_1 = UpsampleBlock("up_1")
 
-        self.up_block_2_a = UpsampleBlock("up_2_a", n_output_chns=OUTPUT_CHNS*2)
-        self.up_block_2_b = UpsampleBlock("up_2_b", n_output_chns=OUTPUT_CHNS*2)
+        self.up_block_2_a = UpsampleBlock("up_2_a", n_output_chns=self.num_classes*2)
+        self.up_block_2_b = UpsampleBlock("up_2_b", n_output_chns=self.num_classes*2)
 
-        self.up_block_3_a = UpsampleBlock("up_block_3_a", n_output_chns=OUTPUT_CHNS*4)
-        self.up_block_3_b = UpsampleBlock("up_block_3_ab", n_output_chns=OUTPUT_CHNS*4)
+        self.up_block_3_a = UpsampleBlock("up_block_3_a", n_output_chns=self.num_classes*4)
+        self.up_block_3_b = UpsampleBlock("up_block_3_ab", n_output_chns=self.num_classes*4)
 
         # Central Slice Layers
 
@@ -86,12 +86,14 @@ class MSNet(tf.keras.Model):
         output_tensor_1 = self.block_1_a(input_tensor)
         output_tensor_1 = self.block_1_b(output_tensor_1)
 
-        ouput_tensor_1 = self.fusion_1(output_tensor_1)
+        output_tensor_1 = self.fusion_1(output_tensor_1)
+
         if self.name in ["WNET", "TNET"]: 
             output_tensor_1 = self.down_block_1(output_tensor_1)
 
         output_tensor_1 = self.block_2_a(output_tensor_1)
         output_tensor_1 = self.block_2_b(output_tensor_1)
+
         output_tensor_1 = self.fusion_2(output_tensor_1)
 
         output_tensor_2 = self.down_block_2(output_tensor_1)
@@ -109,14 +111,12 @@ class MSNet(tf.keras.Model):
         ### Predictions Path ###
         
         # OUTPUT 1
-        #output_tensor_1 = self.central_slice_1(output_tensor_1)
+        output_tensor_1 = self.central_slice_1(output_tensor_1)
         
         if self.name in ["WNET", "TNET"]:
             output_tensor_1 = self.up_block_1(output_tensor_1)
         # else: here add other option for ENET
         
-        print(output_tensor_1.shape)
-
         # OUTPUT 2
         output_tensor_2 = self.central_slice_2(output_tensor_2)
         
@@ -149,7 +149,6 @@ class CentralSliceBlock(tf.keras.Model):
 
     def call(self, input_tensor):
         input_shape = tf.shape(input_tensor)
-
         begin = tf.zeros(tf.size(input_shape)).numpy() 
         begin[1] = self.margin
         begin = tf.convert_to_tensor(begin, dtype=tf.int32)
@@ -215,18 +214,15 @@ class DownsampleBlock(tf.keras.Model):
         super(DownsampleBlock, self).__init__(name=name)
  
         self.n_output_chns = n_output_chns
-        self.kernel = kernel
-        self.strides = strides
         self.reg_decay = 1e-7
-        self.dilation_rate = [1, 1, 1]
 
         # 1) 3D convolution layer
         self.conv3a = tf.keras.layers.Conv3D(
                     self.n_output_chns, 
-                    self.kernel,
-                    self.strides, 
+                    kernel,
+                    strides, 
                     padding="SAME", 
-                    dilation_rate=self.dilation_rate,
+                    dilation_rate=[1,1,1],
                     use_bias=False,
                     kernel_regularizer=tf.keras.regularizers.l2(self.reg_decay),
                     bias_regularizer=tf.keras.regularizers.l2(self.reg_decay),
@@ -259,19 +255,15 @@ class FusionBlock(tf.keras.Model):
         """
         super(FusionBlock, self).__init__(name=name)
         
-        self.n_output_chns = n_output_chns
-        self.kernel = kernel
-        self.strides = strides
         self.reg_decay = 1e-7
-        self.dilation_rate = [1, 1, 1]
         
         # 1) 3D convolution layer
         self.conv3a = tf.keras.layers.Conv3D(
-                    self.n_output_chns, 
-                    self.kernel,
-                    self.strides, 
-                    padding="VALID", 
-                    dilation_rate=self.dilation_rate,
+                    filters=n_output_chns, 
+                    kernel_size=kernel,
+                    strides=strides, 
+                    padding="valid", 
+                    dilation_rate=[1,1,1],
                     use_bias=False,
                     kernel_regularizer=tf.keras.regularizers.l2(self.reg_decay),
                     bias_regularizer=tf.keras.regularizers.l2(self.reg_decay),
@@ -392,22 +384,23 @@ def main():
     
     # Testing the individual components
 
-    input_tensor = tf.zeros([1,144,144,144,1])
+    input_tensor = tf.zeros([1,96,96,96,1])
 
-    block = ResidualIdentityBlock("test_res", [[1,1,1], [1,1,1]])
-    _ = block(input_tensor)
+    #block = ResidualIdentityBlock("test_res", [[1,1,1], [1,1,1]])
+    #_ = block(input_tensor)
     
-    fuseBlock = FusionBlock("fuse_test")
-    _ = fuseBlock(input_tensor)
+    #fuseBlock = FusionBlock("fuse_test")
+    #_ = fuseBlock(input_tensor)
     
-    downBlock = DownsampleBlock("down_test")
-    _ = downBlock(input_tensor)
     
-    upBlock = UpsampleBlock("up_test")
-    _ = upBlock(input_tensor)
+    #downBlock = DownsampleBlock("down_test")
+    #_ = downBlock(input_tensor)
     
-    centralSlice = CentralSliceBlock("center_test", 2)
-    sl = centralSlice(input_tensor)
+    #upBlock = UpsampleBlock("up_test")
+    #_ = upBlock(input_tensor)
+    
+    #centralSlice = CentralSliceBlock("center_test", 2)
+    #_ = centralSlice(input_tensor)
     
     wnet = MSNet(name="wnet")
     pred = wnet(input_tensor)
