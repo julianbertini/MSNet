@@ -51,7 +51,15 @@ def get_label_path(img_path):
 
     return label_path
 
+# TODO:
+# Right now, I am only returning a single (image_patch, label_patch) pair. Let's define this as one "training unit" (TU). 
+# But to the best of my understanding, the way things work with patches is that each TU should not be only a sinlge patch pair, 
+# but rather it should be a collection of patch pairs from the original (image, label) pair. This makes sense since we want to try
+# to fully represent the image in a collection of patches (meanwhile maintaining the benefits of training on smaller sub-units).
 
+# So here I should modify this to actually return a collection of patch pairs (I don't know the perfect number yet, maybe test this).
+# This also agrees with what the Matlab model does, which is return 16 patch pairs per image. And each unit inside a batch, the TU, is
+# actually a collection of patches. So a minibatch size of 5 would actually contain 16*5 = 80 patch pairs. 
 def process_image_train(img_path: tf.Tensor):
     """ * Callback function for tf.data.Dataset.map to process each image file path.
         * For each image file path, it returns a corresponding (image, label) pair.
