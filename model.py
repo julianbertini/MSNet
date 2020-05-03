@@ -7,6 +7,7 @@ import pathlib
 import nibabel as nib
 from viz import Visualize
 
+from data_preprocessor import BATCH_SIZE
 OUTPUT_CHNS = 32
 
 class MSNet(tf.keras.Model):
@@ -20,7 +21,7 @@ class MSNet(tf.keras.Model):
                 name - string, denoting either WNET, TNET, or ENET.
         """
         super(MSNet, self).__init__(name=name.upper())
-        
+
         self.num_classes = num_classes
         self.reg_decay = 1e-7
 
@@ -130,7 +131,7 @@ class MSNet(tf.keras.Model):
             output_tensor_3 = self.up_block_3_b(output_tensor_3)
 
         ### Combine 3 Outputs ###
-        concat = tf.concat([output_tensor_1, output_tensor_2, output_tensor_3], axis = 4, name = "concat")
+        concat = tf.concat([output_tensor_1, output_tensor_2, output_tensor_3], axis = -1, name = "concat")
         pred = self.final_pred(concat)
 
         return pred
@@ -148,17 +149,24 @@ class CentralSliceBlock(tf.keras.Model):
         self.margin = margin
 
     def call(self, input_tensor):
-        input_shape = tf.shape(input_tensor)
-        begin = tf.zeros(tf.size(input_shape)).numpy() 
-        begin[1] = self.margin
-        begin = tf.convert_to_tensor(begin, dtype=tf.int32)
-
-        output_shape = input_shape.numpy()
-        output_shape[1] = output_shape[1] - 2 * self.margin
-        output_shape = tf.convert_to_tensor(output_shape, dtype=tf.int32)
+        input_shape = input_tensor.get_shape().as_list()
         
-        output_tensor = tf.slice(input_tensor, begin, output_shape, name="slice")
+        if input_shape[0] is None:
+            input_shape = [BATCH_SIZE] + input_shape[1:]
+            input_tensor.set_shape(input_shape)
 
+        begin = [0]*len(input_shape)
+        begin[1] = self.margin
+        #begin = tf.convert_to_tensor(begin, dtype=tf.int32)
+
+        output_shape = input_shape
+        output_shape[1] = output_shape[1] - 2 * self.margin
+        #output_shape = tf.convert_to_tensor(output_shape, dtype=tf.int32)
+        
+        print(input_shape)
+        print(input_tensor.shape)
+        output_tensor = tf.slice(input_tensor, begin, output_shape, name="slice")
+        
         return output_tensor
 
 
@@ -354,7 +362,6 @@ class ResidualIdentityBlock(tf.keras.Model):
         
         # 6) PReLU activation function
         self.acti3b = tf.keras.layers.PReLU(name="acti3b")
-        
 
 
     def call(self, input_tensor, training=False):
@@ -369,13 +376,71 @@ class ResidualIdentityBlock(tf.keras.Model):
         # 2nd sub-block
         output_tensor = self.conv3b(output_tensor)
         output_tensor = self.bn3b(output_tensor, training=training)
-
+        
         # Add residual inputs  
         if self.with_residual: 
-            output_tensor += input_tensor
+            output_tensor = AddResidual(bypass_flow=input_tensor)(output_tensor)
 
         # Apply final activation
         output_tensor = self.acti3b(output_tensor)
+
+        return output_tensor
+
+class AddResidual(tf.keras.Model):
+    """
+    This class takes care of the elementwise sum in a residual connection
+    It matches the channel dims from two branch flows,
+    by either padding or projection if necessary.
+    """
+
+    def __init__(self, bypass_flow, name='residual'):
+
+        self.layer_name = name 
+        self.bypass_flow = bypass_flow
+
+        super(AddResidual, self).__init__(name=self.layer_name)
+
+    def infer_spatial_rank(self, input_tensor):
+        """
+        e.g. given an input tensor [Batch, X, Y, Z, Feature] the spatial rank is 3
+        """
+        input_shape = input_tensor.shape
+        input_shape.with_rank_at_least(3)
+
+        return int(input_shape.ndims - 2)
+
+    def call(self, param_flow, training=False):
+        bypass_flow = self.bypass_flow
+        n_param_flow = param_flow.shape[-1]
+        n_bypass_flow = bypass_flow.shape[-1]
+        spatial_rank = self.infer_spatial_rank(param_flow)
+
+        output_tensor = param_flow
+
+        if n_param_flow > n_bypass_flow:  # pad the channel dim
+            pad_1 = np.int((n_param_flow - n_bypass_flow) // 2)
+            pad_2 = np.int(n_param_flow - n_bypass_flow - pad_1)
+            padding_dims = np.vstack(([[0, 0]],
+                                      [[0, 0]] * spatial_rank,
+                                      [[pad_1, pad_2]]))
+            bypass_flow = tf.pad(tensor=bypass_flow,
+                                 paddings=padding_dims.tolist(),
+                                 mode='CONSTANT')
+        elif n_param_flow < n_bypass_flow:  # make a projection
+
+            projector = tf.keras.layers.Conv3D(
+                            n_param_flow, 
+                            kernel_size=1, 
+                            strides=1, 
+                            padding="SAME", 
+                            use_bias=False,
+                            kernel_regularizer=tf.keras.regularizers.l2(self.reg_decay),
+                            bias_regularizer=tf.keras.regularizers.l2(self.reg_decay),
+                            name="projector")
+            bypass_flow = projector(bypass_flow)
+
+        # element-wise sum of both paths
+        output_tensor = param_flow + bypass_flow
 
         return output_tensor
 
@@ -384,7 +449,7 @@ def main():
     
     # Testing the individual components
 
-    input_tensor = tf.zeros([1,96,96,96,1])
+    input_tensor = tf.zeros([1,19,144,144,1])
 
     #block = ResidualIdentityBlock("test_res", [[1,1,1], [1,1,1]])
     #_ = block(input_tensor)

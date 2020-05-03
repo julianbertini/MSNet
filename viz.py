@@ -16,8 +16,8 @@ class Visualize():
 
         for i in range(len(axs)):
             axs[i].volume = image_label_pair[i] 
-            axs[i].index = image_label_pair[i].shape[2] // 2
-            axs[i].imshow(image_label_pair[i][:,:,axs[i].index])
+            axs[i].index = image_label_pair[i].shape[0] // 2
+            axs[i].imshow(image_label_pair[i][axs[i].index, :, :])
 
         fig.canvas.mpl_connect('key_press_event', self.process_key)
 
@@ -32,14 +32,14 @@ class Visualize():
     def previous_slice(self, axs):
         for i in range(len(axs)):
             volume = axs[i].volume
-            axs[i].index = (axs[i].index - 1) % volume.shape[2]  # wrap around using %
-            axs[i].images[0].set_array(volume[:,:,axs[i].index])
+            axs[i].index = (axs[i].index - 1) % volume.shape[0]  # wrap around using %
+            axs[i].images[0].set_array(volume[axs[i].index, :, :])
 
     def next_slice(self, axs):
         for i in range(len(axs)):
             volume = axs[i].volume
-            axs[i].index = (axs[i].index + 1) % volume.shape[2]
-            axs[i].images[0].set_array(volume[:,:,axs[i].index])
+            axs[i].index = (axs[i].index + 1) % volume.shape[0]
+            axs[i].images[0].set_array(volume[axs[i].index, :, :])
             
 
     def remove_keymap_conflicts(self, new_keys_set):
