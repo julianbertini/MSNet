@@ -14,8 +14,8 @@ MODALITY = 0
 # Right now, the smaller label patch will be centered along the same center point as 
 # the image patch. So the label patch will be missing what's left over from the image patch 
 # on either side equally. 
-IMG_PATCH_SIZE = [19, 144, 144] # [depth, height, width]
-LABEL_PATCH_SIZE = [11, 144, 144]
+IMG_PATCH_SIZE = [19, 144, 144, 4] # [depth, height, width, channels]
+LABEL_PATCH_SIZE = [11, 144, 144, 1] # [depth, height, width, channels]
 
 # I'm actually guessing at this order... not sure what the order is
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
@@ -67,11 +67,21 @@ class DataPreprocessor():
 
         return label_path
     
-    def mappable(self, x):
-        image_patch, label_patch = tf.py_function(func=self.process_image_train, inp=[x], Tout=(tf.float32, tf.uint8))
+    def map_path_to_patch_pair(self, img_path):
+        """ * Maps an image path to a patch pair (image and corresponding label patches)
+            * Wrapper for the `process_image_train` function 
+            * Sets the shape of output from tf.py_function, which addressess a known issue with passing Dataset objects to 
+              keras model.fit function
+            
+            Params:
+                img_patch - denoting the file path to the image 
+            Returns:
+                image_patch, label_patch - the image, label patch pair as Tensors
+        """
+        image_patch, label_patch = tf.py_function(func=self.process_image_train, inp=[img_path], Tout=(tf.float32, tf.uint8))
 
-        image_shape = IMG_PATCH_SIZE + [4]
-        label_shape = LABEL_PATCH_SIZE + [1]
+        image_shape = IMG_PATCH_SIZE 
+        label_shape = LABEL_PATCH_SIZE
         image_patch.set_shape(image_shape)
         label_patch.set_shape(label_shape)
 
@@ -149,8 +159,8 @@ class DataPreprocessor():
         
         flag = False 
         while (flag == False):
-            image_patch, prev_center = self.__get_image_patch(input_image, IMG_PATCH_SIZE)
-            label_patch, _ = self.__get_image_patch(input_label, LABEL_PATCH_SIZE, is_label=True, prev_center=prev_center)
+            image_patch, prev_center = self.__get_image_patch(input_image, IMG_PATCH_SIZE[:-1])
+            label_patch, _ = self.__get_image_patch(input_label, LABEL_PATCH_SIZE[:-1], is_label=True, prev_center=prev_center)
             if tf.math.reduce_sum(label_patch, [0,1,2]) > 0:
                 flag = True
         
@@ -235,7 +245,7 @@ class DataPreprocessor():
         # the tf.py_function allows me to convert each element in `img_ds` to numpy format, which is necessary to read nifti images.
         # we have to do this b/c tensorflow does not have a custom .nii.gz image decoder like jpeg or png.
         # According to docs, this lowers performance, but I think this is still better than just doing a for loop b/c of the asynchronous
-        dataset = img_ds.map(self.mappable, num_parallel_calls=AUTOTUNE)
+        dataset = img_ds.map(self.map_path_to_patch_pair, num_parallel_calls=AUTOTUNE)
         #dataset = img_ds.map(lambda x: tf.py_function(func=self.process_image_train, inp=[x], Tout=(tf.float32, tf.uint8)), 
         #        num_parallel_calls=AUTOTUNE)
 
@@ -295,7 +305,9 @@ class DataPreprocessor():
         return input_image
 
 def main():
-    
+    """ Use for testing/debugging purposes
+    """
+
     dp = DataPreprocessor(tumor_region="whole tumor")
  
     img_dir = pathlib.Path(dp.path_to_imgs)
@@ -314,6 +326,7 @@ def main():
     # Create batches, shuffle, etc  
     train = dp.prepare_for_training(img_ds)
     
+    # Visualizing 3D volumes
     viz = Visualize()
 
     for image, label in train.take(1):
