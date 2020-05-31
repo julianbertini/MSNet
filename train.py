@@ -14,10 +14,63 @@ from model import *
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
 
 class DisplayCallback(tf.keras.callbacks.Callback):
+
     def on_epoch_end(self, epoch, logs=None):
         clear_output(wait=True)
         show_predictions()
         print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
+
+class GeneralizedDiceLoss(tf.keras.losses.Loss):
+
+    def call(self, ground_truth, prediction, weight_map=None):
+        """
+            `weight_map` represents same thing as `loss_weight` in tf
+            except that we apply it here directly instead of passing in 
+            through the model.fit attribute `loss_weight`
+        """
+        prediction = tf.cast(prediction, tf.float32)
+        if len(ground_truth.shape) == len(prediction.shape):
+            ground_truth = ground_truth[..., -1]
+        one_hot = labels_to_one_hot(ground_truth, tf.shape(prediction)[-1])
+
+        if weight_map is not None:
+            num_classes = prediction.shape[1].value
+            weight_map_nclasses = tf.tile(
+                tf.expand_dims(tf.reshape(weight_map, [-1]), 1), [1, num_classes])
+            ref_vol = tf.sparse_reduce_sum(
+                weight_map_nclasses * one_hot, reduction_axes=[0])
+
+            intersect = tf.sparse_reduce_sum(
+                weight_map_nclasses * one_hot * prediction, reduction_axes=[0])
+            seg_vol = tf.reduce_sum(
+                tf.multiply(weight_map_nclasses, prediction), 0)
+        else:
+            ref_vol = tf.sparse_reduce_sum(one_hot, reduction_axes=[0])
+            intersect = tf.sparse_reduce_sum(one_hot * prediction,
+                                             reduction_axes=[0])
+            seg_vol = tf.reduce_sum(prediction, 0)
+        if type_weight == 'Square':
+            weights = tf.reciprocal(tf.square(ref_vol))
+        elif type_weight == 'Simple':
+            weights = tf.reciprocal(ref_vol)
+        elif type_weight == 'Uniform':
+            weights = tf.ones_like(ref_vol)
+        else:
+            raise ValueError("The variable type_weight \"{}\""
+                             "is not defined.".format(type_weight))
+        new_weights = tf.where(tf.is_inf(weights), tf.zeros_like(weights), weights)
+        weights = tf.where(tf.is_inf(weights), tf.ones_like(weights) *
+                           tf.reduce_max(new_weights), weights)
+        generalised_dice_numerator = \
+            2 * tf.reduce_sum(tf.multiply(weights, intersect))
+        generalised_dice_denominator = tf.reduce_sum(
+            tf.multiply(weights, tf.maximum(seg_vol + ref_vol, 1)))
+        generalised_dice_score = \
+            generalised_dice_numerator / generalised_dice_denominator
+        generalised_dice_score = tf.where(tf.is_nan(generalised_dice_score), 1.0,
+                                          generalised_dice_score)
+        return 1 - generalised_dice_score
+
 
 def main():
 
@@ -47,7 +100,7 @@ def main():
 
     model = MSNet("test_msnet")
     model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-3),
-                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
+                  loss=GeneralizedDiceLoss(),
                   metrics=['accuracy'],
                   run_eagerly=True)
 
@@ -56,8 +109,7 @@ def main():
 
     model_history = model.fit(train_dataset, 
                               epochs=EPOCHS,
-                              steps_per_epoch=STEPS_PER_EPOCH,
-                              callbacks=[DisplayCallback()])
+                              steps_per_epoch=STEPS_PER_EPOCH)
 
     # Visualize a patch
     #viz = Visualize()

@@ -15,7 +15,7 @@ MODALITY = 0
 # the image patch. So the label patch will be missing what's left over from the image patch 
 # on either side equally. 
 IMG_PATCH_SIZE = [19, 144, 144, 4] # [depth, height, width, channels]
-LABEL_PATCH_SIZE = [11, 144, 144, 1] # [depth, height, width, channels]
+LABEL_PATCH_SIZE = [19, 144, 144, 1] # [depth, height, width, channels]
 
 # I'm actually guessing at this order... not sure what the order is
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
@@ -33,6 +33,9 @@ class DataPreprocessor():
     def read_nifti(self, img_path_bytes, label=False):
         """ Reads in an nii.gz format image 
 
+            NOTE: Image is read in as [x, y, z, chn], but later we treat it as [z, y, x, chn] due to 
+                  tf convention, so here the image is reshaped to match [z, y, x, chn]
+
             Params:
                 img_path_bytes - bytes, the image path in byte form
             Returns:
@@ -49,8 +52,10 @@ class DataPreprocessor():
         if label:
             img = tf.image.convert_image_dtype(img, tf.uint8)
             img = tf.reshape(img, [img.shape[0], img.shape[1], img.shape[2], 1])
+            img = tf.transpose(img, perm=(2, 1, 0, 3))
         else:
             img = tf.image.convert_image_dtype(img, tf.float32)
+            img = tf.transpose(img, perm=(2, 1, 0, 3))
 
         return img
 
@@ -66,6 +71,7 @@ class DataPreprocessor():
         label_path = tf.strings.join([self.path_to_labels, parts[-1]], os.path.sep)
 
         return label_path
+
     
     def map_path_to_patch_pair(self, img_path):
         """ * Maps an image path to a patch pair (image and corresponding label patches)
@@ -123,7 +129,7 @@ class DataPreprocessor():
         image_patch, label_patch = self.get_random_patch(input_image, input_label)
 
         # Augment Data
-        #image_patch, label_patch = self.augment_patch(image_patch, label_patch)
+        image_patch, label_patch = self.augment_patch(image_patch, label_patch)
 
         # Make label binary for tumor region in question
         label_patch = tf.where(label_patch >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))            
@@ -138,11 +144,39 @@ class DataPreprocessor():
         #image_patch = tf.image.random_brightness(image_patch, max_delta=0.5)
         
         # Randomly perform either rotation or reflection
-        if tf.random.uniform(()) > 0.5:
-            image_patch = tf.image.flip_left_right(image_patch)
-            label_patch = tf.image.flip_left_right(label_patch)
+        
+        rand_val = tf.random.uniform(())
+        if rand_val <= 0.25:
+            image_patch = self.apply_transform(image_patch, tf.image.rot90)
+            label_patch = self.apply_transform(label_patch, tf.image.rot90)
+        elif rand_val <= 0.5:
+            image_patch = self.apply_transform(image_patch, tf.image.flip_left_right)
+            label_patch = self.apply_transform(label_patch, tf.image.flip_left_right)
         
         return image_patch, label_patch
+
+
+    def apply_transform(self, input_img, tf_transform):
+        """ applies a 2D tf transform (i.e., rotate) to a 3D image by iterating through
+            each slice
+
+            Params:
+                image - the tf array detailing the image
+                tf_transform - the tf transform function, i.e., tf.image.rot90
+            Returns:
+                image_trans - transformed 3D image
+        """
+        
+        img_size = tf.shape(input_img).numpy()
+        
+        z_slices = []
+        for idx in range(img_size[0]):
+            trans_sl = tf_transform(input_img[idx,:,:,:])
+            z_slices.append(trans_sl)
+
+        output_img = tf.stack(z_slices, axis=0)
+
+        return output_img
 
 
     def get_random_patch(self, input_image, input_label):
@@ -300,7 +334,17 @@ class DataPreprocessor():
         # Subtract the mean from each element and divide by standard deviation
         input_image = tf.math.subtract(input_image, mean)
         input_image = tf.math.divide(input_image, std)
-        
+
+
+        # Set image values to range from [0,1]
+
+        # Add min to make all elements >= 0
+        min_per_mod = tf.math.reduce_min(input_image, [0,1,2])
+        # subtract since min is negative, and we want to add
+        input_image = tf.math.subtract(input_image, min_per_mod)
+        # Divide by max to make all elements <= 1
+        max_per_mod = tf.math.reduce_max(input_image, [0,1,2])
+        input_image = tf.math.divide(input_image, max_per_mod)
 
         return input_image
 
