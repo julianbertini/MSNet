@@ -1,5 +1,4 @@
 import tensorflow as tf
-from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import os
@@ -8,14 +7,14 @@ import nibabel as nib
 from viz import Visualize
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
-BATCH_SIZE = 5
+BATCH_SIZE = 2
 BUFFER_SIZE = 10
 MODALITY = 0
 # Right now, the smaller label patch will be centered along the same center point as 
 # the image patch. So the label patch will be missing what's left over from the image patch 
 # on either side equally. 
-IMG_PATCH_SIZE = [19, 144, 144, 4] # [depth, height, width, channels]
-LABEL_PATCH_SIZE = [19, 144, 144, 1] # [depth, height, width, channels]
+IMG_PATCH_SIZE = [19, 122, 122, 4] # [depth, height, width, channels]
+LABEL_PATCH_SIZE = [11, 122, 122, 1] # [depth, height, width, channels]
 
 # I'm actually guessing at this order... not sure what the order is
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
@@ -296,17 +295,18 @@ class DataPreprocessor():
         
         dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)
         
+        
+        dataset = dataset.batch(BATCH_SIZE)
+
         # Repeat this dataset indefinitely; meaning, we never run out of data to pull from.
         # Since we called shuffle() before, each repetition of the data here will be a differently
         # shuffled collection of images (shuffle() by default reshuffles after each iteration, and
         # repeat() is basically calling an indefinite number of iterations)
         dataset = dataset.repeat()
-        
-        dataset = dataset.batch(BATCH_SIZE)
 
         # prefetch allows later elements to be prepared while the current element is being processed. 
         # Improves throughput at the expense of using additional memory to store prefetched elements. 
-        dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
+        #dataset = dataset.prefetch(buffer_size=tf.data.experimental.AUTOTUNE)
 
         return dataset
 
@@ -372,7 +372,7 @@ def main():
     
     # Visualizing 3D volumes
     viz = Visualize()
-
+	
     for image, label in train.take(1):
         print("Image shape: ", image.shape)
         print("Label: ", label.shape)
