@@ -72,7 +72,7 @@ class DataPreprocessor():
         return label_path
 
     
-    def map_path_to_patch_pair(self, img_path):
+    def map_path_to_patch_pair(self, img_path, is_training=True):
         """ * Maps an image path to a patch pair (image and corresponding label patches)
             * Wrapper for the `process_image_train` function 
             * Sets the shape of output from tf.py_function, which addressess a known issue with passing Dataset objects to 
@@ -83,7 +83,7 @@ class DataPreprocessor():
             Returns:
                 image_patch, label_patch - the image, label patch pair as Tensors
         """
-        image_patch, label_patch = tf.py_function(func=self.process_image_train, inp=[img_path], Tout=(tf.float32, tf.uint8))
+        image_patch, label_patch = tf.py_function(func=self.process_image_train, inp=[img_path, is_training], Tout=(tf.float32, tf.uint8))
 
         image_shape = IMG_PATCH_SIZE 
         label_shape = LABEL_PATCH_SIZE
@@ -105,7 +105,7 @@ class DataPreprocessor():
     # actually a collection of patches. So a minibatch size of 5 would actually contain 16*5 = 80 patch pairs. 
     #
     # Update: based on MSNet Github, it seemes like they only use 1 random patch per image for training.
-    def process_image_train(self, img_path: tf.Tensor):
+    def process_image_train(self, img_path: tf.Tensor, is_training=True):
         """ * Callback function for tf.data.Dataset.map to process each image file path.
             * For each image file path, it returns a corresponding (image, label) pair.
             * This is the parent function that wraps all other processing helpers.
@@ -113,6 +113,7 @@ class DataPreprocessor():
 
             Params:
                 img_path - tf.Tensor, representing the path to an image file
+                is_training - denoting whether to process images for training (true) or testing/validation (false)
             Returns:
                 img, label - tuple of (tf.float32, tf.uint8) arrays representing the image and label arrays
         """
@@ -126,9 +127,10 @@ class DataPreprocessor():
         input_image = self.normalize(input_image)
         
         image_patch, label_patch = self.get_random_patch(input_image, input_label)
-
-        # Augment Data
-        image_patch, label_patch = self.augment_patch(image_patch, label_patch)
+        
+        if is_training:
+            # Augment Data
+            image_patch, label_patch = self.augment_patch(image_patch, label_patch)
 
         # Make label binary for tumor region in question
         label_patch = tf.where(label_patch >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))            
@@ -260,7 +262,28 @@ class DataPreprocessor():
                                 rand_x-half_margin_x:rand_x+half_margin_x+remainder_x,:]
 
         return image_patch, [rand_z, rand_y, rand_x]
+    
+    def prepare_for_testing(self, img_ds):
+        """ * Takes in the testing/validation dataset and prepares images for testing/validation
+            * Calls `process_image_train` to process each image, label pair 
+            * This is the wrapper function to do all data proceessing to ready it for testing. 
+            
+            Params:
+                img_ds - tf.data.Dataset, containing the paths to the training images 
+                cache - Bool or String, denoting whether to cache in memory or in a directory
+            Returns:
+                dataset - tf.data.Dataset, a shuffled batch of image/label pairs of size BATCH_SIZE ready for training 
+        """
+        # `num_parallel_calls` allows for mltiple images to be loaded/processed in parallel. 
+        # the tf.py_function allows me to convert each element in `img_ds` to numpy format, which is necessary to read nifti images.
+        # we have to do this b/c tensorflow does not have a custom .nii.gz image decoder like jpeg or png.
+        # According to docs, this lowers performance, but I think this is still better than just doing a for loop b/c of the asynchronous
+        dataset = img_ds.map(lambda img_path: self.map_path_to_patch_pair(img_path, is_training=False))
 
+        # Select a batch of size BATCH_SIZE
+        dataset = dataset.batch(BATCH_SIZE)
+
+        return dataset
 
     def prepare_for_training(self, img_ds, cache=True, shuffle_buffer_size=BUFFER_SIZE):
         """ * Takes in the entire dataset and prepares shuffled batches of images for training
@@ -278,7 +301,7 @@ class DataPreprocessor():
         # the tf.py_function allows me to convert each element in `img_ds` to numpy format, which is necessary to read nifti images.
         # we have to do this b/c tensorflow does not have a custom .nii.gz image decoder like jpeg or png.
         # According to docs, this lowers performance, but I think this is still better than just doing a for loop b/c of the asynchronous
-        dataset = img_ds.map(self.map_path_to_patch_pair, num_parallel_calls=AUTOTUNE)
+        dataset = img_ds.map(lambda img_path: self.map_path_to_patch_pair(img_path, is_training=True), num_parallel_calls=AUTOTUNE)
         #dataset = img_ds.map(lambda x: tf.py_function(func=self.process_image_train, inp=[x], Tout=(tf.float32, tf.uint8)), 
         #        num_parallel_calls=AUTOTUNE)
 
@@ -295,7 +318,7 @@ class DataPreprocessor():
         
         dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)
         
-        
+        # Select a batch of size BATCH_SIZE
         dataset = dataset.batch(BATCH_SIZE)
 
         # Repeat this dataset indefinitely; meaning, we never run out of data to pull from.
