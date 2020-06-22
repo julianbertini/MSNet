@@ -142,10 +142,12 @@ def main():
 
 	dp = DataPreprocessor(tumor_region="whole tumor")
 	
-	img_dir = pathlib.Path(dp.path_to_imgs)
+	train_img_dir = pathlib.Path(dp.path_to_train_imgs)
+	val_img_dir = pathlib.Path(dp.path_to_val_imgs)
 	
-	TRAIN_LENGTH = len(list(img_dir.glob("*.nii.gz")))
-	print(TRAIN_LENGTH)
+	TRAIN_LENGTH = len(list(train_img_dir.glob("*.nii.gz")))
+	VAL_LENGTH = len(list(val_img_dir.glob("*.nii.gz")))
+
     # The tf.data.Dataset API supports writing descriptive and efficient input pipelines.
     #   - Create a source dataset from your input data
     #   - Apply dataset transformation to preprocess the data
@@ -155,14 +157,18 @@ def main():
 
     # Generates a dataset list of all files matching one or more glob patters.
     # It will return filenames in a non-deterministic random shuffle order.
-	img_ds = dataset.list_files(str(img_dir/"*"))
+	train_img_ds = dataset.list_files(str(train_img_dir/"*"))
+	val_img_ds = dataset.list_files(str(val_img_dir/"*"))
 
     # Takes in the imgs paths and does all data preprocesesing, returning shuffled batches ready for training
-	train_dataset = dp.prepare_for_training(img_ds)
+	train_dataset = dp.prepare_for_training(train_img_ds, cache=True)
+	val_dataset = dp.prepare_for_testing(val_img_ds, purpose="val")
     # Setup training
 
-	EPOCHS = 209
+	EPOCHS = 75 
 	STEPS_PER_EPOCH = TRAIN_LENGTH // BATCH_SIZE
+	VAL_STEPS = VAL_LENGTH // BATCH_SIZE 
+
 	print("STEPS PER EPOCH")
 	print(STEPS_PER_EPOCH)
 
@@ -178,7 +184,30 @@ def main():
 
 	model_history = model.fit(train_dataset,
 								  epochs=EPOCHS,
-								  steps_per_epoch=STEPS_PER_EPOCH)
+								  steps_per_epoch=STEPS_PER_EPOCH,
+								  validation_data=val_dataset,
+								  validation_steps=VAL_STEPS,
+								  validation_freq=1)
+
+
+	tf.saved_model.save(model, "tf_MSNet_v1")
+	#model.save("tf_model_v1")
+
+	loss = model_history.history['loss']
+	val_loss = model_history.history['val_loss']
+
+	epochs = range(EPOCHS)
+
+	plt.figure()
+	plt.plot(epochs, loss, 'r', label='Training loss')
+	plt.plot(epochs, val_loss, 'bo', label='Validation loss')
+	plt.title('Training and Validation Loss')
+	plt.xlabel('Epoch')
+	plt.ylabel('Loss Value')
+	plt.ylim([0, 1])
+	plt.legend()
+	plt.savefig("tf_model_v1.0_loss.png")
+
 
     # Visualize a patch
     # viz = Visualize()

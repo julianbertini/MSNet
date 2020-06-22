@@ -7,7 +7,7 @@ import nibabel as nib
 from viz import Visualize
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
-BATCH_SIZE = 2
+BATCH_SIZE = 3
 BUFFER_SIZE = 10
 MODALITY = 0
 # Right now, the smaller label patch will be centered along the same center point as
@@ -332,7 +332,7 @@ class DataPreprocessor():
         # we have to do this b/c tensorflow does not have a custom .nii.gz image decoder like jpeg or png.
         # According to docs, this lowers performance, but I think this is still better than just doing a for loop b/c of the asynchronous
         dataset = img_ds.map(lambda img_path: self.map_path_to_patch_pair(
-            img_path, purpose="train"), num_parallel_calls=AUTOTUNE)
+            img_path, purpose="train"), num_parallel_calls=None)
         # dataset = img_ds.map(lambda x: tf.py_function(func=self.process_image_train, inp=[x], Tout=(tf.float32, tf.uint8)),
         #        num_parallel_calls=AUTOTUNE)
 
