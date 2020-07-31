@@ -9,7 +9,7 @@ The model is fully implemented and runs. However, I was not able to fully reprod
 
 The only way the model ran was by decreasing the input patch size significantly and reducing the batch size to at *most* 2. With this configuration, though, the model did not appear to learn very well, as shown by the training curve:
 
-![tf_model_v1.0_loss.png](loss)
+![loss](tf_model_v1.0_loss.png)
 
 ### Citations
 - [1] Guotai Wang, Wenqi Li, Sebastien Ourselin, Tom Vercauteren. "Automatic Brain Tumor Segmentation using Cascaded Anisotropic Convolutional Neural Networks." In Brainlesion: Glioma, Multiple Sclerosis, Stroke and Traumatic Brain Injuries. Pages 179-190. Springer, 2018. https://arxiv.org/abs/1709.00382
