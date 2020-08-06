@@ -158,8 +158,8 @@ def main():
 	train_img_dir = pathlib.Path(dp.path_to_train_imgs)
 	val_img_dir = pathlib.Path(dp.path_to_val_imgs)
 	
-	TRAIN_LENGTH = len(list(train_img_dir.glob("*.nii.gz")))
-	VAL_LENGTH = len(list(val_img_dir.glob("*.nii.gz")))
+	TRAIN_LENGTH = len(list(train_img_dir.glob("*.npy")))
+	VAL_LENGTH = len(list(val_img_dir.glob("*.npy")))
 
     # The tf.data.Dataset API supports writing descriptive and efficient input pipelines.
     #   - Create a source dataset from your input data

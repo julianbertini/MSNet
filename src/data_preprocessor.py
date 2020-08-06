@@ -6,11 +6,11 @@ import pathlib
 import nibabel as nib
 from viz import Visualize
 
-from train import *
+#from train import *
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 BATCH_SIZE = 5
-BUFFER_SIZE = 100
+BUFFER_SIZE = 50
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
 # on either side equally.
@@ -454,7 +454,7 @@ def main():
     img_ds = dataset.list_files(str(img_dir/"*"))
 
     # Create batches, shuffle, etc
-    train = dp.prepare_for_testing(img_ds, "train")
+    train = dp.prepare_for_training(img_ds, "train")
 
     # Visualizing 3D volumes
     viz = Visualize()
