@@ -23,6 +23,9 @@ This should be run BEFORE anythin else, as this will process the .nii.gz
 images and save new ones for the ROIs. Those new images can then be used
 for training and fed into the rest of the data preprocessing pipeline that
 takes action when the training process begins.
+
+TODO:
+- Vectorize the process instead of looping through images to improve speed
 """
 
 def check_edges(im, roi, slice_x, slice_y, padding):
