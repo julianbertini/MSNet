@@ -20,6 +20,19 @@ class DisplayCallback(tf.keras.callbacks.Callback):
         show_predictions()
         print('\nSample Prediction after epoch {}\n'.format(epoch + 1))
 
+class DiceScore(tf.keras.metrics.Metric):
+
+    def __init__(self, name='dice_score', **kwargs):
+        super(DiceScore, self).__init__(name=name, **kwargs)
+        self.score = self.add_weight(name='score', initializer='zeros')
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+
+        gdl = GeneralizedDiceLoss()
+        self.score = (gdl(y_true, y_pred) - 1) * -1
+
+    def result(self):
+        return self.score
 
 class GeneralizedDiceLoss(tf.keras.losses.Loss):
 
@@ -177,7 +190,7 @@ def main():
 
 	model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-3),
 				  loss=GeneralizedDiceLoss(),
-				  metrics=['accuracy'],
+				  metrics=[DiceScore()],
 				  run_eagerly=True)
 
 	# tf.keras.utils.plot_model(model, show_shapes=True)
@@ -190,7 +203,7 @@ def main():
 								  validation_freq=1)
 
 
-	tf.saved_model.save(model, "tf_MSNet_v1")
+	tf.saved_model.save(model, "tf_MSNet_v2")
 	#model.save("tf_model_v1")
 
 	loss = model_history.history['loss']
@@ -206,7 +219,7 @@ def main():
 	plt.ylabel('Loss Value')
 	plt.ylim([0, 1])
 	plt.legend()
-	plt.savefig("tf_model_v1.0_loss.png")
+	plt.savefig("tf_model_v2_loss.png")
 
 
     # Visualize a patch

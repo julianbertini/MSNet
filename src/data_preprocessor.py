@@ -6,15 +6,16 @@ import pathlib
 import nibabel as nib
 from viz import Visualize
 
+from train import *
+
 AUTOTUNE = tf.data.experimental.AUTOTUNE
-BATCH_SIZE = 3
-BUFFER_SIZE = 10
-MODALITY = 0
+BATCH_SIZE = 5
+BUFFER_SIZE = 100
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
 # on either side equally.
-IMG_PATCH_SIZE = [19, 122, 122, 4]  # [depth, height, width, channels]
-LABEL_PATCH_SIZE = [11, 122, 122, 1]  # [depth, height, width, channels]
+IMG_PATCH_SIZE = [19, 112, 112, 4]  # [depth, height, width, channels]
+LABEL_PATCH_SIZE = [11, 112, 112, 1]  # [depth, height, width, channels]
 
 # I'm actually guessing at this order... not sure what the order is
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
@@ -24,13 +25,14 @@ TUMOR_REGIONS = {"whole tumor": 1, "tumor core": 2, "active tumor": 3}
 
 class DataPreprocessor():
 
-    def __init__(self, tumor_region,
-                        path_to_train_labels="../../Task01_BrainTumour/labelsTr",
-                 path_to_train_imgs="../../Task01_BrainTumour/imagesTr",
-                 path_to_val_imgs="../../Task01_BrainTumour/imagesVal",
-                 path_to_val_labels="../../Task01_BrainTumour/labelsVal",
-                 path_to_test_imgs="../../Task01_BrainTumour/imagesTest",
-                 path_to_test_labels="../../Task01_BrainTumour/labelsTest"):
+    def __init__(self, 
+                 tumor_region=None,
+                 path_to_train_labels="../../../Task01_BrainTumour/p_labelsTr",
+                 path_to_train_imgs="../../../Task01_BrainTumour/p_imagesTr",
+                 path_to_val_imgs="../../../Task01_BrainTumour/p_imagesVal",
+                 path_to_val_labels="../../../Task01_BrainTumour/p_labelsVal",
+                 path_to_test_imgs="../../../Task01_BrainTumour/imagesTest",
+                 path_to_test_labels="../../../Task01_BrainTumour/labelsTest"):
 
         self.path_to_train_imgs = path_to_train_imgs
         self.path_to_train_labels = path_to_train_labels
@@ -42,8 +44,28 @@ class DataPreprocessor():
         self.path_to_val_labels = path_to_val_labels
 
         self.tumor_region = tumor_region
+    
+    def read_npy(self, img_path_bytes, label=False, img_channels=4):
+        """ Reads from a numpy saved file
+        """
+        # Decode img_path from bytes to string
+        img_path = img_path_bytes.decode("utf-8")
 
-    def read_nifti(self, img_path_bytes, label=False):
+        img = np.load(img_path)
+
+        if label:
+            img = tf.image.convert_image_dtype(img, tf.uint8)
+            img = tf.reshape(
+                img, [img.shape[0], img.shape[1], img.shape[2], 1])
+            img = tf.transpose(img, perm=(2, 1, 0, 3))
+        else:
+            img = tf.image.convert_image_dtype(img, tf.float32)
+            img = tf.transpose(img, perm=(2, 1, 0, 3))
+            img = img[:, :, :, 0:img_channels]
+
+        return img
+
+    def read_nifti(self, img_path_bytes, label=False, img_channels=4):
         """ Reads in an nii.gz format image
 
             NOTE: Image is read in as [x, y, z, chn], but later we treat it as [z, y, x, chn] due to
@@ -70,6 +92,7 @@ class DataPreprocessor():
         else:
             img = tf.image.convert_image_dtype(img, tf.float32)
             img = tf.transpose(img, perm=(2, 1, 0, 3))
+            img = img[:, :, :, 0:img_channels]
 
         return img
 
@@ -142,8 +165,11 @@ class DataPreprocessor():
 
         label_path = self.get_label_path(img_path, purpose)
 
-        input_image = self.read_nifti(img_path.numpy())
-        input_label = self.read_nifti(label_path.numpy(), label=True)
+        input_image = self.read_npy(img_path.numpy(), img_channels=4)
+        input_label = self.read_npy(label_path.numpy(), label=True)
+        
+        #input_image = self.read_nifti(img_path.numpy(), img_channels=4)
+        #input_label = self.read_nifti(label_path.numpy(), label=True)
 
         # Normalize image
         input_image = self.normalize(input_image)
@@ -157,7 +183,8 @@ class DataPreprocessor():
                 image_patch, label_patch)
 
         # Make label binary for tumor region in question
-        label_patch = tf.where(label_patch >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))
+        if self.tumor_region:
+            label_patch = tf.where(label_patch >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))
 
         return image_patch, label_patch
 
@@ -179,6 +206,10 @@ class DataPreprocessor():
                 image_patch, tf.image.flip_left_right)
             label_patch = self.apply_transform(
                 label_patch, tf.image.flip_left_right)
+        
+        # Random brightness and random contrast transformations 
+        #image_patch = self.apply_transform(image_patch, lambda input_img: tf.image.random_contrast(input_img, 0.3, 0.5))
+        #image_patch = self.apply_transform(image_patch, lambda input_img: tf.image.random_brightness(input_img, 0.2)) 
 
         return image_patch, label_patch
 
@@ -332,7 +363,7 @@ class DataPreprocessor():
         # we have to do this b/c tensorflow does not have a custom .nii.gz image decoder like jpeg or png.
         # According to docs, this lowers performance, but I think this is still better than just doing a for loop b/c of the asynchronous
         dataset = img_ds.map(lambda img_path: self.map_path_to_patch_pair(
-            img_path, purpose="train"), num_parallel_calls=None)
+            img_path, purpose="train"), num_parallel_calls=AUTOTUNE)
         # dataset = img_ds.map(lambda x: tf.py_function(func=self.process_image_train, inp=[x], Tout=(tf.float32, tf.uint8)),
         #        num_parallel_calls=AUTOTUNE)
 
@@ -342,14 +373,15 @@ class DataPreprocessor():
         if cache:
             # If entire dataset does not fit in memory, then specify cache as the name of directory to cache data into
             if isinstance(cache, str):
+                print("Caching on disk...")
                 dataset = dataset.cache(cache)
             # If entire dataset fits in memory, then just cache dataset in memory
             else:
                 dataset = dataset.cache()
 
-        dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)
 
         # Select a batch of size BATCH_SIZE
+        dataset = dataset.shuffle(buffer_size=shuffle_buffer_size)
         dataset = dataset.batch(BATCH_SIZE)
 
         # Repeat this dataset indefinitely; meaning, we never run out of data to pull from.
@@ -406,9 +438,9 @@ def main():
     """ Use for testing/debugging purposes
     """
 
-    dp = DataPreprocessor(tumor_region="whole tumor")
+    dp = DataPreprocessor()
 
-    img_dir = pathlib.Path(dp.path_to_val_imgs)
+    img_dir = pathlib.Path(dp.path_to_train_imgs)
 
     # The tf.data.Dataset API supports writing descriptive and efficient input pipelines.
     #   - Create a source dataset from your input data
@@ -422,18 +454,20 @@ def main():
     img_ds = dataset.list_files(str(img_dir/"*"))
 
     # Create batches, shuffle, etc
-    train = dp.prepare_for_testing(img_ds, "val")
+    train = dp.prepare_for_testing(img_ds, "train")
 
     # Visualizing 3D volumes
     viz = Visualize()
+  
+    for i in range(10):
+      for image, label in train.take(1):
+          gdl = GeneralizedDiceLoss()
+          loss = gdl(label, label)
+          print("dice coeff")
+          print((loss-1)*-1)
 
-    for image, label in train.take(1):
-        print("Image shape: ", image.shape)
-        print("Label: ", label.shape)
-        print(np.nanmax(label.numpy()))
-
-        viz.multi_slice_viewer([image.numpy()[0, :,:,:, 0], label.numpy()[0,:,:,:, 0]])
-        plt.show()
+          #viz.multi_slice_viewer([image.numpy()[0, :,:,:, 0], label.numpy()[0,:,:,:, 0]])
+          #plt.show()
 
 
 if __name__ == "__main__":
