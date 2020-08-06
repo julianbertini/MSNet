@@ -6,7 +6,7 @@ import pathlib
 import nibabel as nib
 from viz import Visualize
 
-from train import *
+#from train import *
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 BATCH_SIZE = 5
