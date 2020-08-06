@@ -461,13 +461,13 @@ def main():
   
     for i in range(10):
       for image, label in train.take(1):
-          gdl = GeneralizedDiceLoss()
-          loss = gdl(label, label)
-          print("dice coeff")
-          print((loss-1)*-1)
+          #gdl = GeneralizedDiceLoss()
+          #loss = gdl(label, label)
+          #print("dice coeff")
+          #print((loss-1)*-1)
 
-          #viz.multi_slice_viewer([image.numpy()[0, :,:,:, 0], label.numpy()[0,:,:,:, 0]])
-          #plt.show()
+          viz.multi_slice_viewer([image.numpy()[0, :,:,:, 0], label.numpy()[0,:,:,:, 0]])
+          plt.show()
 
 
 if __name__ == "__main__":
