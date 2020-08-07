@@ -28,8 +28,10 @@ class DiceScore(tf.keras.metrics.Metric):
 
     def update_state(self, y_true, y_pred, sample_weight=None):
 
-        gdl = GeneralizedDiceLoss()
-        self.score = (gdl(y_true, y_pred) - 1) * -1
+		dsc_numerator = 2 * tf.reduce_sum(tf.multiply(y_pred,y_true)) + 1e-10
+		dsc_denominator = tf.reduce_sum(y_pred) + tf.reduce_sum(y_true) + 1e-10
+		
+        self.score = dsc_numerator / dsc_denominator 
 
     def result(self):
         return self.score
@@ -174,7 +176,7 @@ def main():
 	val_img_ds = dataset.list_files(str(val_img_dir/"*"))
 
     # Takes in the imgs paths and does all data preprocesesing, returning shuffled batches ready for training
-	train_dataset = dp.prepare_for_training(train_img_ds, cache=True)
+	train_dataset = dp.prepare_for_training(train_img_ds, cache='/home/jbertini/scratch-midway2/Python/MSNet/src/model_cache')
 	val_dataset = dp.prepare_for_testing(val_img_ds, purpose="val")
     # Setup training
 
