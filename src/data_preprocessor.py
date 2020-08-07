@@ -10,15 +10,15 @@ from viz import Visualize
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 BATCH_SIZE = 5
-BUFFER_SIZE = 50
+BUFFER_SIZE = 385
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
 # on either side equally.
-IMG_PATCH_SIZE = [19, 112, 112, 4]  # [depth, height, width, channels]
-LABEL_PATCH_SIZE = [11, 112, 112, 1]  # [depth, height, width, channels]
+IMG_PATCH_SIZE = [19, 98, 98, 4]  # [depth, height, width, channels]
+LABEL_PATCH_SIZE = [11, 98, 98, 1]  # [depth, height, width, channels]
 
-# I'm actually guessing at this order... not sure what the order is
-MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
+# These are correct order. Obtained from Coursera.
+MODALITIES = {"flair": 0, "t1": 1, "t1c": 2, "t2": 3}
 # These are in reverse order on purpose to make conditional below work
 TUMOR_REGIONS = {"whole tumor": 1, "tumor core": 2, "active tumor": 3}
 
@@ -410,28 +410,29 @@ class DataPreprocessor():
                   * Matlab code also forces all pixels to be between [-5, 5] (before normalizing to be between [0,1])
                     and this just seems kind of arbitrary. I'm not sure what this does. 
         """
+		print(tf.shape(input_image))
 
         # Calculate the mean for the image for each modality
         # mean is an array with 4 elements: the mean for each modality (or "sequence")
-        mean = tf.math.reduce_mean(input_image, [0, 1,2])
+        mean = tf.math.reduce_mean(input_image, [0, 1])
         # Same for standard deviation
-        std = tf.math.reduce_std(input_image, [0, 1,2])
+        std = tf.math.reduce_std(input_image, [0, 1])
 
         # Subtract the mean from each element and divide by standard deviation
         input_image = tf.math.subtract(input_image, mean)
-        input_image = tf.math.divide(input_image, std)
+		input_image = tf.where(std != 0, tf.divide(input_image,std), input_image)
 
         # Set image values to range from [0,1]
 
-        # Add min to make all elements >= 0
-        min_per_mod = tf.math.reduce_min(input_image, [0, 1,2])
-        # subtract since min is negative, and we want to add
-        input_image = tf.math.subtract(input_image, min_per_mod)
-        # Divide by max to make all elements <= 1
-        max_per_mod = tf.math.reduce_max(input_image, [0, 1,2])
-        input_image = tf.math.divide(input_image, max_per_mod)
+        ## Add min to make all elements >= 0
+        #min_per_mod = tf.math.reduce_min(input_image, [0, 1,2])
+        ## subtract since min is negative, and we want to add
+        #input_image = tf.math.subtract(input_image, min_per_mod)
+        ## Divide by max to make all elements <= 1
+        #max_per_mod = tf.math.reduce_max(input_image, [0, 1,2])
+        #input_image = tf.math.divide(input_image, max_per_mod)
 
-        return input_image
+		return input_image
 
 
 def main():
