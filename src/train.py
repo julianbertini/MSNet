@@ -8,6 +8,7 @@ import nibabel as nib
 from viz import Visualize
 from data_preprocessor import *
 from model import *
+from eval import dice_score
 
 # I'm actually guessing at this order... I think it's right
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
@@ -34,26 +35,22 @@ class DiceScore(tf.keras.metrics.Metric):
         """ 
         # for each volume in batch
         n_scores = 0.0
-        score = 0.0
+        sum_score = 0.0
+        current_score = 0.0
         for b in range(tf.shape(y_pred)[0]):
-          #print('y_pred in dice score:', y_pred.shape)
-          vol_pred = y_pred[b]
           vol_true = tf.cast(y_true[b], dtype=tf.float32)
           
+          vol_pred = y_pred[b]
           vol_pred = tf.nn.softmax(vol_pred)
           vol_pred = tf.argmax(vol_pred, axis=-1)
-          vol_pred = vol_pred[..., tf.newaxis]
+          vol_pred = tf.expand_dims(vol_pred, axis=-1)
           vol_pred = tf.cast(vol_pred, tf.float32)
-          #print(vol_pred)
-
-          dsc_numerator = 2 * tf.reduce_sum(tf.multiply(vol_pred, vol_true)) + 1e-10
-          dsc_denominator = tf.reduce_sum(vol_pred) + tf.reduce_sum(vol_true) + 1e-10
-
-          score = dsc_numerator / dsc_denominator  
-          score += score
+          
+          current_score = dice_score(vol_pred, vol_true)
+          sum_score += current_score
           n_scores += 1
 		
-        self.score = score / n_scores
+        self.score = sum_score / n_scores
 
     def result(self):
         return self.score

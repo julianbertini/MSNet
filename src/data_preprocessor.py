@@ -9,7 +9,7 @@ from viz import Visualize
 #from train import *
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
-BATCH_SIZE = 5
+BATCH_SIZE = 4
 BUFFER_SIZE = 10
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
@@ -53,7 +53,7 @@ class DataPreprocessor():
       image and label passed in should be PRE normalization, so that 
       the background is still zero.
       """
-      weight_map = tf.where(image_patch > tf.constant(0, dtype=tf.float32), tf.ones_like(label_patch, dtype=tf.dtypes.int32), tf.zeros_like(label_patch, dtype=tf.dtypes.int32))
+      weight_map = tf.where(image_patch > tf.constant(0, dtype=tf.float32), tf.ones_like(image_patch, dtype=tf.dtypes.int32), tf.zeros_like(image_patch, dtype=tf.dtypes.int32))
       
       return weight_map
 
@@ -515,12 +515,6 @@ def main():
   
     for i in range(10):
       for image, label in train.take(1):
-          #gdl = GeneralizedDiceLoss()
-          #loss = gdl(label, label)
-          #print("dice coeff")
-          #print((loss-1)*-1)
-          # [batch, depth, chn]
-          #print(image.shape)
           for z in range(image.shape[1]):
             img_slice = image[3,z,:,:,2]
             std = tf.math.reduce_std(image)

@@ -10,29 +10,14 @@ from data_preprocessor import *
 from model import *
 
 
-def __tp_map(seg, ref):
-	"""
-		This function calculates the true positive map (i.e. how many 
-		reference voxels are positive)
-
-		:return: TP map
-	"""
-	seg = tf.cast(seg, dtype=bool)
-	ref = tf.cast(ref, dtype=bool)
-	return tf.cast(tf.math.logical_and(ref, seg), dtype=tf.float32)
-
-def __tp(tp_map):
-	return tf.math.reduce_sum(tp_map)
-
 def dice_score(seg, ref):
-	tp_map = __tp_map(seg, ref)
-	tp = __tp(tp_map)
-	seg = tf.cast(seg, dtype=tf.float32)
-	ref = tf.cast(ref, dtype=tf.float32)	
-	numerator = tf.cast(tf.math.multiply(tf.constant(2, dtype=tf.float32), tp), dtype=tf.float32)
-	denominator = tf.math.reduce_sum(tf.math.add(ref, seg))
+  seg = tf.cast(seg, dtype=tf.float32)
+  ref = tf.cast(ref, dtype=tf.float32)
 
-	return tf.math.divide(numerator, denominator)
+  dsc_numerator = tf.constant(2, dtype=tf.float32) * tf.reduce_sum(tf.multiply(seg, ref)) + 1e-10
+  dsc_denominator = tf.reduce_sum(seg) + tf.reduce_sum(ref) + 1e-10
+
+  return tf.math.divide(dsc_numerator, dsc_denominator)
 
 def dice_similarity(model, dataset=None, num=60):
 	scores = []
