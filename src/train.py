@@ -27,72 +27,137 @@ class DiceScore(tf.keras.metrics.Metric):
         self.score = self.add_weight(name='score', initializer='zeros')
 
     def update_state(self, y_true, y_pred, sample_weight=None):
+        """
+          Calculate the average dice score across the current training batch
+        """ 
+        # for each volume in batch
+        n_scores = 0
+        score = 0
+        for b in range(tf.shape(y_pred)[0]):
+          vol_pred = tf.cast(y_pred[b], dtype=tf.float32)
+          vol_true = tf.cast(y_true[b], dtype=tf.float32)
+          
+          vol_pred = tf.nn.softmax(vol_pred)
+          vol_pred = tf.argmax(vol_pred, axis=-1)
+          vol_pred = vol_pred[..., tf.newaxis]
 
-		dsc_numerator = 2 * tf.reduce_sum(tf.multiply(y_pred,y_true)) + 1e-10
-		dsc_denominator = tf.reduce_sum(y_pred) + tf.reduce_sum(y_true) + 1e-10
+          dsc_numerator = 2 * tf.reduce_sum(tf.multiply(vol_pred, vol_true)) + 1e-10
+          dsc_denominator = tf.reduce_sum(vol_pred) + tf.reduce_sum(vol_true) + 1e-10
+
+          score = dsc_numerator / dsc_denominator  
+          score += score
+          n_scores += 1
 		
-        self.score = dsc_numerator / dsc_denominator 
+        self.score = score / n_scores
 
     def result(self):
         return self.score
 
 class GeneralizedDiceLoss(tf.keras.losses.Loss):
 
-    def labels_to_one_hot(self, ground_truth, num_classes=1):
-        """
-    Converts ground truth labels to one-hot, sparse tensors.
-    Used extensively in segmentation losses.
-
-    :param ground_truth: ground truth categorical labels (rank `N`)
-    :param num_classes: A scalar defining the depth of the one hot dimension
-        (see `depth` of `tf.one_hot`)
-    :return: one-hot sparse tf tensor
-        (rank `N+1`; new axis appended at the end)
-    """
-    # read input/output shapes
-        if isinstance(num_classes, tf.Tensor):
-            num_classes_tf = tf.cast(num_classes, dtype=tf.int32)
-        else:
-            num_classes_tf = tf.constant(num_classes, tf.int32)
-        input_shape = tf.shape(ground_truth)
-        output_shape = tf.concat(
-            [input_shape, tf.reshape(num_classes_tf, (1,))], 0)
-
-        if num_classes == 1:
-            # need a sparse representation?
-            return tf.reshape(ground_truth, output_shape)
-
-        # squeeze the spatial shape
-        ground_truth = tf.reshape(ground_truth, (-1,))
-        # shape of squeezed output
-        dense_shape = tf.stack([tf.shape(ground_truth)[0], num_classes_tf], 0)
-
-        # create a rank-2 sparse tensor
-        ground_truth = tf.cast(ground_truth, dtype=tf.int64)
-        ids = tf.range(tf.cast(dense_shape[0], dtype=tf.int64), dtype=tf.int64)
-        ids = tf.stack([ids, ground_truth], axis=1)
-        one_hot = tf.sparse.SparseTensor(
-            indices=ids,
-            values=tf.ones_like(ground_truth, dtype=tf.float32),
-            dense_shape=tf.cast(dense_shape, dtype=tf.int64))
-
-        # resume the spatial dims
-        one_hot = tf.sparse.reshape(one_hot, output_shape)
-
-        return one_hot
-
     def call(self, ground_truth, prediction, weight_map=None):
         """
-                `weight_map` represents same thing as `loss_weight` in tf
-                except that we apply it here directly instead of passing in
-                through the model.fit attribute `loss_weight`
+        Compute loss from `prediction` and `ground truth`,
+        the computed loss map are weighted by `weight_map`.
+
+        if `prediction `is list of tensors, each element of the list
+        will be compared against `ground_truth` and the weighted by
+        `weight_map`. (Assuming the same gt and weight across scales)
+
+        :param prediction: input will be reshaped into
+            ``(batch_size, N_voxels, num_classes)``
+        :param ground_truth: input will be reshaped into
+            ``(batch_size, N_voxels, ...)``
+        :param weight_map: input will be reshaped into
+            ``(batch_size, N_voxels, ...)``
+        :return:
+        """
+        with_softmax = True
+        num_classes = tf.shape(prediction)[-1]
+        with tf.device('/cpu:0'):
+
+            # prediction should be a list for multi-scale losses
+            # single scale ``prediction`` is converted to ``[prediction]``
+            if not isinstance(prediction, (list, tuple)):
+                prediction = [prediction]
+
+            data_loss = []
+            for ind, pred in enumerate(prediction):
+
+                # go through each scale
+                def _batch_i_loss(*args):
+                    """
+                    loss for the `b_id`-th batch (over spatial dimensions)
+
+                    :param b_id:
+                    :return:
+                    """
+                    # unpacking input from map_fn elements
+                    if len(args[0]) == 2:
+                        # pred and ground_truth
+                        pred_b, ground_truth_b = args[0]
+                        weight_b = None
+                    else:
+                        pred_b, ground_truth_b, weight_b = args[0]
+
+                    pred_b = tf.reshape(pred_b, [-1, num_classes])
+                    # performs softmax if required
+                    if with_softmax:
+                        pred_b = tf.cast(pred_b, dtype=tf.float32)
+                        pred_b = tf.nn.softmax(pred_b)
+
+                    # reshape pred, ground_truth, weight_map to the same
+                    # size: (n_voxels, num_classes)
+                    # if the ground_truth has only one channel, the shape
+                    # becomes: (n_voxels,)
+                    if not pred_b.shape.is_fully_defined():
+                        ref_shape = tf.stack(
+                            [tf.shape(pred_b)[0], tf.constant(-1)], 0)
+                    else:
+                        ref_shape = pred_b.shape.as_list()[:-1] + [-1]
+
+                    ground_truth_b = tf.reshape(ground_truth_b, ref_shape)
+                    if ground_truth_b.shape.as_list()[-1] == 1:
+                        ground_truth_b = tf.squeeze(ground_truth_b, axis=-1)
+
+                    if weight_b is not None:
+                        weight_b = tf.reshape(weight_b, ref_shape)
+                        if weight_b.shape.as_list()[-1] == 1:
+                            weight_b = tf.squeeze(weight_b, axis=-1)
+
+                    # preparing loss function parameters
+                    loss_params = {
+                        'prediction': pred_b,
+                        'ground_truth': ground_truth_b,
+                        'weight_map': weight_b}
+
+                    return tf.cast(self.generalised_dice_loss(**loss_params), dtype=tf.float32)
+
+                if weight_map is not None:
+                    elements = (pred, ground_truth, weight_map)
+                else:
+                    elements = (pred, ground_truth)
+
+                loss_batch = tf.map_fn(
+                    fn=_batch_i_loss,
+                    elems=elements,
+                    dtype=tf.float32,
+                    parallel_iterations=1)
+
+                # loss averaged over batch
+                data_loss.append(tf.math.reduce_mean(loss_batch))
+            # loss averaged over multiple scales
+            return tf.math.reduce_mean(data_loss)
+
+    def generalised_dice_loss(self, prediction, ground_truth, weight_map=None):
+        """
+        `weight_map` represents same thing as `loss_weight` in tf
+        except that we apply it here directly instead of passing in
+        through the model.fit attribute `loss_weight`
         """
         type_weight = "Square"
 
         prediction = tf.cast(prediction, tf.float32)
-        # Calculate softmax for prediction. Default is to reduce based on last
-        # dimension.
-        prediction = tf.nn.softmax(prediction)
 
         if len(ground_truth.shape) == len(prediction.shape):
             ground_truth = ground_truth[..., -1]
@@ -138,6 +203,48 @@ class GeneralizedDiceLoss(tf.keras.losses.Loss):
                                           generalised_dice_score)
         return 1 - generalised_dice_score
 
+    def labels_to_one_hot(self, ground_truth, num_classes=1):
+        """
+        Converts ground truth labels to one-hot, sparse tensors.
+        Used extensively in segmentation losses.
+
+        :param ground_truth: ground truth categorical labels (rank `N`)
+        :param num_classes: A scalar defining the depth of the one hot dimension
+            (see `depth` of `tf.one_hot`)
+        :return: one-hot sparse tf tensor
+            (rank `N+1`; new axis appended at the end)
+        """
+        # read input/output shapes
+        if isinstance(num_classes, tf.Tensor):
+            num_classes_tf = tf.cast(num_classes, dtype=tf.int32)
+        else:
+            num_classes_tf = tf.constant(num_classes, tf.int32)
+        input_shape = tf.shape(ground_truth)
+        output_shape = tf.concat(
+            [input_shape, tf.reshape(num_classes_tf, (1,))], 0)
+
+        if num_classes == 1:
+            # need a sparse representation?
+            return tf.reshape(ground_truth, output_shape)
+
+        # squeeze the spatial shape
+        ground_truth = tf.reshape(ground_truth, (-1,))
+        # shape of squeezed output
+        dense_shape = tf.stack([tf.shape(ground_truth)[0], num_classes_tf], 0)
+
+        # create a rank-2 sparse tensor
+        ground_truth = tf.cast(ground_truth, dtype=tf.int64)
+        ids = tf.range(tf.cast(dense_shape[0], dtype=tf.int64), dtype=tf.int64)
+        ids = tf.stack([ids, ground_truth], axis=1)
+        one_hot = tf.sparse.SparseTensor(
+            indices=ids,
+            values=tf.ones_like(ground_truth, dtype=tf.float32),
+            dense_shape=tf.cast(dense_shape, dtype=tf.int64))
+
+        # resume the spatial dims
+        one_hot = tf.sparse.reshape(one_hot, output_shape)
+
+        return one_hot
 
 def main():
 

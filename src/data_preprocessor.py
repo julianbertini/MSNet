@@ -10,7 +10,7 @@ from viz import Visualize
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 BATCH_SIZE = 5
-BUFFER_SIZE = 385
+BUFFER_SIZE = 10
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
 # on either side equally.
@@ -171,20 +171,23 @@ class DataPreprocessor():
         #input_image = self.read_nifti(img_path.numpy(), img_channels=4)
         #input_label = self.read_nifti(label_path.numpy(), label=True)
 
-        # Normalize image
-        input_image = self.normalize(input_image)
+        # Make label binary for tumor region in question
+        if self.tumor_region:
+            input_label = tf.where(input_label >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))
 
+        # Fetch random image patch
         image_patch, label_patch = self.get_random_patch(
             input_image, input_label)
+
+
+        # Normalize image patch AFTER creating the patch
+        image_patch = self.normalize(image_patch)
 
         if purpose == "train":
             # Augment Data
             image_patch, label_patch = self.augment_patch(
                 image_patch, label_patch)
 
-        # Make label binary for tumor region in question
-        if self.tumor_region:
-            label_patch = tf.where(label_patch >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))
 
         return image_patch, label_patch
 
@@ -240,21 +243,34 @@ class DataPreprocessor():
             * Loops until a patch is returned where the labels are not all zeros (all background)
 
             Params:
-                input_image - tf.float32 array representing the entireimage 
+                input_image - tf.float32 array representing the entire image 
                 input_label - tf.float32 array representing the entire labeled image
             Returns:
                 image_patch - tf.float32 array representing the image patch 
                 label_path -  tf.float32 array representing the corresponding label patch
         """
-
+        max_tries = 1000 # prevent infinite loop
+        tries = 0
         flag = False
-        while (flag == False):
+        while (flag == False and tries < max_tries):
             image_patch, prev_center = self.__get_image_patch(
                 input_image, IMG_PATCH_SIZE[:-1])
             label_patch, _ = self.__get_image_patch(
                 input_label, LABEL_PATCH_SIZE[:-1], is_label=True, prev_center=prev_center)
-            if tf.math.reduce_sum(label_patch, [0, 1,2]) > 0:
+            tumor_pixels = tf.where(label_patch > 0, tf.ones_like(label_patch, dtype=tf.dtypes.int32), tf.zeros_like(label_patch, dtype=tf.dtypes.int32))
+            tumor_pixels = tf.math.reduce_sum(tumor_pixels)
+            tumor_pixels = tf.cast(tumor_pixels, dtype=tf.float32)
+            total_pixels = tf.size(label_patch, out_type=tf.dtypes.int32)
+            total_pixels = tf.cast(total_pixels, dtype=tf.float32)
+            tumor_frac = tf.math.divide(tumor_pixels, total_pixels)
+            
+            # Keep trying until tumor region is at least 5% of the total patch
+            assert total_pixels > tumor_pixels
+            if tumor_frac > 0.05:
+                print(tumor_frac)
                 flag = True
+
+            tries += 1
 
         return image_patch, label_patch
 
@@ -363,7 +379,7 @@ class DataPreprocessor():
         # we have to do this b/c tensorflow does not have a custom .nii.gz image decoder like jpeg or png.
         # According to docs, this lowers performance, but I think this is still better than just doing a for loop b/c of the asynchronous
         dataset = img_ds.map(lambda img_path: self.map_path_to_patch_pair(
-            img_path, purpose="train"), num_parallel_calls=AUTOTUNE)
+            img_path, purpose="train"), num_parallel_calls=None)
         # dataset = img_ds.map(lambda x: tf.py_function(func=self.process_image_train, inp=[x], Tout=(tf.float32, tf.uint8)),
         #        num_parallel_calls=AUTOTUNE)
 
@@ -401,7 +417,7 @@ class DataPreprocessor():
             * All images should be normalized, including test images
 
             Params:
-                input_image - tf.float32 array representing the image, dims: (240, 240, 155, 4)
+                input_image - tf.float32 array representing the image, dims: (depth, height, width, channels)
 
             TODO: * Maybe split this into separate methods for training, testing, etc.
                   * Also, Matlab model sets all pixels that were 0 before normalization to 0 after normalization.
@@ -410,36 +426,60 @@ class DataPreprocessor():
                   * Matlab code also forces all pixels to be between [-5, 5] (before normalizing to be between [0,1])
                     and this just seems kind of arbitrary. I'm not sure what this does. 
         """
-		print(tf.shape(input_image))
+        
+        # Normalize across each z-slice and each modality (as they do in Coursera)
+        c_stacks = [] 
+        for c in range(input_image.shape[3]):
+          z_stacks = []
+          for z in range(input_image.shape[0]):
+          
+            image_slice = input_image[z,:,:,c]
+            centered = image_slice - tf.math.reduce_mean(image_slice)  
+            
+            std = tf.math.reduce_std(centered)
+            if std != 0:
+              centered_scaled = centered / std
+              z_stacks.append(centered_scaled)
+            else:
+              z_stacks.append(centered)
+          
+          c_stacks.append(tf.stack(z_stacks, axis=0))
+        norm_image = tf.stack(c_stacks, axis=-1)
+      
+        #print(tf.math.reduce_std(norm_image[50,:,:,2]))
+  
+        #input_image = tf.transpose(input_image, perm=(2, 1, 0, 3))  
 
-        # Calculate the mean for the image for each modality
-        # mean is an array with 4 elements: the mean for each modality (or "sequence")
-        mean = tf.math.reduce_mean(input_image, [0, 1])
-        # Same for standard deviation
-        std = tf.math.reduce_std(input_image, [0, 1])
+        ## Calculate the mean for the image for each modality
+        ## mean is an array with 4 elements: the mean for each modality (or "sequence")
+        #mean = tf.math.reduce_mean(input_image, [0, 1])
+        ## Same for standard deviation
+        #std = tf.math.reduce_std(input_image, [0, 1])
 
-        # Subtract the mean from each element and divide by standard deviation
-        input_image = tf.math.subtract(input_image, mean)
-		input_image = tf.where(std != 0, tf.divide(input_image,std), input_image)
+        ## Subtract the mean from each element and divide by standard deviation
+        #input_image = tf.math.subtract(input_image, mean)
+        #input_image = tf.where(std != 0, tf.divide(input_image,std), input_image)
 
-        # Set image values to range from [0,1]
+        ## Set image values to range from [0,1]
 
-        ## Add min to make all elements >= 0
-        #min_per_mod = tf.math.reduce_min(input_image, [0, 1,2])
-        ## subtract since min is negative, and we want to add
-        #input_image = tf.math.subtract(input_image, min_per_mod)
-        ## Divide by max to make all elements <= 1
-        #max_per_mod = tf.math.reduce_max(input_image, [0, 1,2])
-        #input_image = tf.math.divide(input_image, max_per_mod)
+        ### Add min to make all elements >= 0
+        ##min_per_mod = tf.math.reduce_min(input_image, [0, 1,2])
+        ### subtract since min is negative, and we want to add
+        ##input_image = tf.math.subtract(input_image, min_per_mod)
+        ### Divide by max to make all elements <= 1
+        ##max_per_mod = tf.math.reduce_max(input_image, [0, 1,2])
+        ##input_image = tf.math.divide(input_image, max_per_mod)
 
-		return input_image
+        #input_image = tf.transpose(input_image, perm=(2, 1, 0, 3))
+
+        return norm_image
 
 
 def main():
     """ Use for testing/debugging purposes
     """
 
-    dp = DataPreprocessor()
+    dp = DataPreprocessor(tumor_region="whole tumor")
 
     img_dir = pathlib.Path(dp.path_to_train_imgs)
 
@@ -455,7 +495,7 @@ def main():
     img_ds = dataset.list_files(str(img_dir/"*"))
 
     # Create batches, shuffle, etc
-    train = dp.prepare_for_training(img_ds, "train")
+    train = dp.prepare_for_training(img_ds)
 
     # Visualizing 3D volumes
     viz = Visualize()
@@ -466,6 +506,14 @@ def main():
           #loss = gdl(label, label)
           #print("dice coeff")
           #print((loss-1)*-1)
+          # [batch, depth, chn]
+          #print(image.shape)
+          for z in range(image.shape[1]):
+            img_slice = image[3,z,:,:,2]
+            std = tf.math.reduce_std(image)
+            mean = tf.math.reduce_mean(image)
+            #print(std)
+            #print(mean)
 
           viz.multi_slice_viewer([image.numpy()[0, :,:,:, 0], label.numpy()[0,:,:,:, 0]])
           plt.show()
