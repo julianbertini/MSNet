@@ -19,9 +19,9 @@ LABEL_PATCH_SIZE = [11, 98, 98, 1]  # [depth, height, width, channels]
 
 # These are correct order. Obtained from Coursera.
 MODALITIES = {"flair": 0, "t1": 1, "t1c": 2, "t2": 3}
-# These are in reverse order on purpose to make conditional below work
 TUMOR_REGIONS = {"whole tumor": 1, "tumor core": 2, "active tumor": 3}
 
+# TODO: create brain weight_map and pass it along attached to label. This will be used in training to omit background from training loss.
 
 class DataPreprocessor():
 
@@ -45,6 +45,18 @@ class DataPreprocessor():
 
         self.tumor_region = tumor_region
     
+    def get_weight_map(self, image_patch, label_patch):
+      """
+      Creates a binary mask around the brain region to be used by loss
+      function such as to only consider brain region in computing loss.
+
+      image and label passed in should be PRE normalization, so that 
+      the background is still zero.
+      """
+      weight_map = tf.where(image_patch > tf.constant(0, dtype=tf.float32), tf.ones_like(label_patch, dtype=tf.dtypes.int32), tf.zeros_like(label_patch, dtype=tf.dtypes.int32))
+      
+      return weight_map
+
     def read_npy(self, img_path_bytes, label=False, img_channels=4):
         """ Reads from a numpy saved file
         """
@@ -54,7 +66,7 @@ class DataPreprocessor():
         img = np.load(img_path)
 
         if label:
-            img = tf.image.convert_image_dtype(img, tf.uint8)
+            img = tf.image.convert_image_dtype(img, tf.int32)
             img = tf.reshape(
                 img, [img.shape[0], img.shape[1], img.shape[2], 1])
             img = tf.transpose(img, perm=(2, 1, 0, 3))
@@ -85,7 +97,7 @@ class DataPreprocessor():
         img = np.asarray(img.dataobj)
 
         if label:
-            img = tf.image.convert_image_dtype(img, tf.uint8)
+            img = tf.image.convert_image_dtype(img, tf.int32)
             img = tf.reshape(
                 img, [img.shape[0], img.shape[1], img.shape[2], 1])
             img = tf.transpose(img, perm=(2, 1, 0, 3))
@@ -128,7 +140,7 @@ class DataPreprocessor():
                 image_patch, label_patch - the image, label patch pair as Tensors
         """
         image_patch, label_patch = tf.py_function(func=self.process_image_train, inp=[
-                                                  img_path, purpose], Tout=(tf.float32, tf.uint8))
+                                                  img_path, purpose], Tout=(tf.float32, tf.int32))
 
         image_shape = IMG_PATCH_SIZE
         label_shape = LABEL_PATCH_SIZE
@@ -173,12 +185,13 @@ class DataPreprocessor():
 
         # Make label binary for tumor region in question
         if self.tumor_region:
-            input_label = tf.where(input_label >= TUMOR_REGIONS[self.tumor_region], tf.constant(1, dtype=tf.uint8), tf.constant(0, dtype=tf.uint8))
+            input_label = tf.where(input_label >= tf.constant(TUMOR_REGIONS[self.tumor_region], dtype=tf.int32), tf.constant(1, dtype=tf.int32), tf.constant(0, dtype=tf.int32))
 
         # Fetch random image patch
         image_patch, label_patch = self.get_random_patch(
             input_image, input_label)
-
+        
+        weight_map = self.get_weight_map(image_patch, label_patch)
 
         # Normalize image patch AFTER creating the patch
         image_patch = self.normalize(image_patch)
@@ -267,7 +280,7 @@ class DataPreprocessor():
             # Keep trying until tumor region is at least 5% of the total patch
             assert total_pixels > tumor_pixels
             if tumor_frac > 0.05:
-                print(tumor_frac)
+                #print(tumor_frac)
                 flag = True
 
             tries += 1
