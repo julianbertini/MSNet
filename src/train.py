@@ -29,17 +29,22 @@ class DiceScore(tf.keras.metrics.Metric):
     def update_state(self, y_true, y_pred, sample_weight=None):
         """
           Calculate the average dice score across the current training batch
+          y_true [n_batches, n_voxels, n_channels]
+          y_pred [n_batches, n_voxels, ...]
         """ 
         # for each volume in batch
-        n_scores = 0
-        score = 0
+        n_scores = 0.0
+        score = 0.0
         for b in range(tf.shape(y_pred)[0]):
-          vol_pred = tf.cast(y_pred[b], dtype=tf.float32)
+          #print('y_pred in dice score:', y_pred.shape)
+          vol_pred = y_pred[b]
           vol_true = tf.cast(y_true[b], dtype=tf.float32)
           
           vol_pred = tf.nn.softmax(vol_pred)
           vol_pred = tf.argmax(vol_pred, axis=-1)
           vol_pred = vol_pred[..., tf.newaxis]
+          vol_pred = tf.cast(vol_pred, tf.float32)
+          #print(vol_pred)
 
           dsc_numerator = 2 * tf.reduce_sum(tf.multiply(vol_pred, vol_true)) + 1e-10
           dsc_denominator = tf.reduce_sum(vol_pred) + tf.reduce_sum(vol_true) + 1e-10
