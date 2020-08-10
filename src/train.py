@@ -315,7 +315,7 @@ def main():
 
 
 	tf.saved_model.save(model, "tf_MSNet_v2")
-	#model.save("tf_model_v1")
+	#model.save("test")
 
 	loss = model_history.history['loss']
 	val_loss = model_history.history['val_loss']
