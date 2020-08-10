@@ -9,7 +9,7 @@ from viz import Visualize
 
 from data_preprocessor import BATCH_SIZE
 OUTPUT_CHNS = 32
-
+LARGER_NETS = ['WNET', 'TNET']
 
 class MSNet(tf.keras.Model):
 
@@ -34,17 +34,17 @@ class MSNet(tf.keras.Model):
         self.block_2_a = ResidualIdentityBlock("res_block_2_a")
         self.block_2_b = ResidualIdentityBlock("res_block_2_b")
 
-        self.block_3_a = ResidualIdentityBlock("res_block_3_b")
+        self.block_3_a = ResidualIdentityBlock("res_block_3_a")
         self.block_3_b = ResidualIdentityBlock(
             "res_block_3_b", dilation_rates=[[1, 2, 2], [1, 2, 2]])
         self.block_3_c = ResidualIdentityBlock(
-            "res_block_3_b", dilation_rates=[[1, 3, 3], [1, 3, 3]])
+            "res_block_3_c", dilation_rates=[[1, 3, 3], [1, 3, 3]])
 
-        self.block_4_c = ResidualIdentityBlock(
-            "res_block_4_b", dilation_rates=[[1, 3, 3], [1, 3, 3]])
+        self.block_4_a = ResidualIdentityBlock(
+            "res_block_4_a", dilation_rates=[[1, 3, 3], [1, 3, 3]])
         self.block_4_b = ResidualIdentityBlock(
             "res_block_4_b", dilation_rates=[[1, 2, 2], [1, 2, 2]])
-        self.block_4_a = ResidualIdentityBlock("res_block_4_b")
+        self.block_4_c = ResidualIdentityBlock("res_block_4_c")
 
         # Fusion Layers
 
@@ -71,12 +71,21 @@ class MSNet(tf.keras.Model):
         self.up_block_3_a = UpsampleBlock(
             "up_block_3_a", n_output_chns=self.num_classes*4)
         self.up_block_3_b = UpsampleBlock(
-            "up_block_3_ab", n_output_chns=self.num_classes*4)
+            "up_block_3_b", n_output_chns=self.num_classes*4)
 
         # Central Slice Layers
 
         self.central_slice_1 = CentralSliceBlock("central_1", 2)
         self.central_slice_2 = CentralSliceBlock("central_2", 1)
+		
+		# ENET-specific layer
+        self.pred1 = tf.keras.layers.Conv3D(
+					self.num_classes,
+                    kernel_size=[1, 3, 3],
+                    padding = 'SAME',
+                    kernel_regularizer=tf.keras.regularizers.l2(self.reg_decay),
+                    bias_regularizer=tf.keras.regularizers.l2(self.reg_decay),
+                    name='pred1')
 
         # Final Prediction Layer
 
@@ -93,15 +102,13 @@ class MSNet(tf.keras.Model):
 
         output_tensor_1 = self.block_1_a(input_tensor, training=training)
         output_tensor_1 = self.block_1_b(output_tensor_1, training=training)
-
         output_tensor_1 = self.fusion_1(output_tensor_1, training=training)
 
-        if self.name in ["WNET", "TNET"]:
+        if self.name in LARGER_NETS: 
             output_tensor_1 = self.down_block_1(output_tensor_1, training=training)
 
         output_tensor_1 = self.block_2_a(output_tensor_1, training=training)
         output_tensor_1 = self.block_2_b(output_tensor_1, training=training)
-
         output_tensor_1 = self.fusion_2(output_tensor_1, training=training)
 
         output_tensor_2 = self.down_block_2(output_tensor_1, training=training)
@@ -113,28 +120,26 @@ class MSNet(tf.keras.Model):
         output_tensor_3 = self.block_4_a(output_tensor_2, training=training)
         output_tensor_3 = self.block_4_b(output_tensor_3, training=training)
         output_tensor_3 = self.block_4_c(output_tensor_3, training=training)
-
         output_tensor_3 = self.fusion_4(output_tensor_3, training=training)
 
         ### Predictions Path ###
 
         # OUTPUT 1
         output_tensor_1 = self.central_slice_1(output_tensor_1)
-
-        if self.name in ["WNET", "TNET"]:
+        if self.name in LARGER_NETS: 
             output_tensor_1 = self.up_block_1(output_tensor_1, training=training)
-        # else: here add other option for ENET
+        else: #here add other option for ENET
+            output_tensor_1 = self.pred1(output_tensor_1)
 
         # OUTPUT 2
         output_tensor_2 = self.central_slice_2(output_tensor_2)
-
         output_tensor_2 = self.up_block_2_a(output_tensor_2, training=training)
-        if self.name in ["WNET", "TNET"]:
+        if self.name in LARGER_NETS: 
             output_tensor_2 = self.up_block_2_b(output_tensor_2, training=training)
 
         # OUTPUT 3
         output_tensor_3 = self.up_block_3_a(output_tensor_3, training=training)
-        if self.name in ["WNET", "TNET"]:
+        if self.name in LARGER_NETS: 
             output_tensor_3 = self.up_block_3_b(output_tensor_3, training=training)
 
         ### Combine 3 Outputs ###
@@ -455,7 +460,7 @@ def main():
 
     # Testing the individual components
 
-    input_tensor = tf.zeros([1, 19, 144, 144, 1])
+    input_tensor = tf.zeros([1, 19, 96, 96, 4])
 
     #block = ResidualIdentityBlock("test_res", [[1,1,1], [1,1,1]])
     #_ = block(input_tensor)
@@ -472,7 +477,7 @@ def main():
     #centralSlice = CentralSliceBlock("center_test", 2)
     #_ = centralSlice(input_tensor)
 
-    wnet = MSNet(name="wnet")
+    wnet = MSNet(name="enet")
     pred = wnet(input_tensor)
 
     print(pred.shape)
