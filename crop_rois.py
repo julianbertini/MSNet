@@ -10,7 +10,7 @@ from shutil import rmtree
 from sys import exit
 from natsort import natsorted
 
-from viz import Visualize
+#from viz import Visualize
 
 """
 This program pre-processes 3-D volumetric images to extract and save 

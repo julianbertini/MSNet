@@ -10,7 +10,7 @@ from viz import Visualize
 
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 BATCH_SIZE = 4
-BUFFER_SIZE = 10
+BUFFER_SIZE = 385
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
 # on either side equally.
@@ -205,8 +205,8 @@ class DataPreprocessor():
         return image_patch, label_patch
 
     def augment_patch(self, image_patch, label_patch):
-        """ Need to fix this. The tf.image methods expect 3D image, not 4D image. Need to 
-            adapt them somehow to work on the 4D volumetric data.
+        """ 
+           TODO: add up/down flipping with tf.image.flip_up_down 
         """
         # Give image a random brightness
         #image_patch = tf.image.random_brightness(image_patch, max_delta=0.5)

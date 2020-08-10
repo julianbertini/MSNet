@@ -1,3 +1,3 @@
 #!/bin/bash
 
-python crop_rois.py --imageDir='../../Task01_BrainTumour/imagesTr' --labelDir='../../Task01_BrainTumour/labelsTr' --destDir='../../Task01_BrainTumour/'
+python crop_rois.py --imageDir='../../Task01_BrainTumour/imagesVal' --labelDir='../../Task01_BrainTumour/labelsVal' --destDir='../../Task01_BrainTumour/'
