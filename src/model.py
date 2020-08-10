@@ -55,23 +55,27 @@ class MSNet(tf.keras.Model):
 
         # Downsampling Layers
 
-        self.down_block_1 = DownsampleBlock("down_1")
+        if self.name in LARGER_NETS:
+            self.down_block_1 = DownsampleBlock("down_1")
         self.down_block_2 = DownsampleBlock("down_2")
 
         # Upsampling Layers
         # need to make an extra prediction block for the ENet, which does not have upsampling for the first prediction
 
-        self.up_block_1 = UpsampleBlock("up_1")
+        if self.name in LARGER_NETS:
+            self.up_block_1 = UpsampleBlock("up_block_1")
 
         self.up_block_2_a = UpsampleBlock(
-            "up_2_a", n_output_chns=self.num_classes*2)
-        self.up_block_2_b = UpsampleBlock(
-            "up_2_b", n_output_chns=self.num_classes*2)
+            "up_block_2_a", n_output_chns=self.num_classes*2)
+        if self.name in LARGER_NETS:
+            self.up_block_2_b = UpsampleBlock(
+				"up_block_2_b", n_output_chns=self.num_classes*2)
 
         self.up_block_3_a = UpsampleBlock(
             "up_block_3_a", n_output_chns=self.num_classes*4)
-        self.up_block_3_b = UpsampleBlock(
-            "up_block_3_b", n_output_chns=self.num_classes*4)
+        if self.name in LARGER_NETS:
+            self.up_block_3_b = UpsampleBlock(
+				"up_block_3_b", n_output_chns=self.num_classes*4)
 
         # Central Slice Layers
 
@@ -79,13 +83,14 @@ class MSNet(tf.keras.Model):
         self.central_slice_2 = CentralSliceBlock("central_2", 1)
 		
 		# ENET-specific layer
-        self.pred1 = tf.keras.layers.Conv3D(
+        if self.name not in LARGER_NETS:
+            self.pred1 = tf.keras.layers.Conv3D(
 					self.num_classes,
-                    kernel_size=[1, 3, 3],
-                    padding = 'SAME',
-                    kernel_regularizer=tf.keras.regularizers.l2(self.reg_decay),
-                    bias_regularizer=tf.keras.regularizers.l2(self.reg_decay),
-                    name='pred1')
+					kernel_size=[1, 3, 3],
+					padding = 'SAME',
+					kernel_regularizer=tf.keras.regularizers.l2(self.reg_decay),
+					bias_regularizer=tf.keras.regularizers.l2(self.reg_decay),
+					name='pred1')
 
         # Final Prediction Layer
 
@@ -460,7 +465,7 @@ def main():
 
     # Testing the individual components
 
-    input_tensor = tf.zeros([1, 19, 96, 96, 4])
+    input_tensor = tf.zeros([1, 19, 124, 124, 4])
 
     #block = ResidualIdentityBlock("test_res", [[1,1,1], [1,1,1]])
     #_ = block(input_tensor)
