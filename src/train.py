@@ -28,7 +28,7 @@ class DiceScoreCallback(tf.keras.callbacks.Callback):
         else:
             print('logs in none in DiceScoreCallback')
 
-    def on_train_end(logs=None):
+    def on_train_end(self, logs=None):
         try:
             print('Saving dice scores over time plot...')
             plt.figure()
