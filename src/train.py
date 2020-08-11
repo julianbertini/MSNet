@@ -14,12 +14,35 @@ from eval import dice_score
 MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
 
 
-class DisplayCallback(tf.keras.callbacks.Callback):
+class DiceScoreCallback(tf.keras.callbacks.Callback):
 
-    def on_epoch_end(self, epoch, logs=None):
-        clear_output(wait=True)
-        show_predictions()
-        print('\nSample Prediction after epoch {}\n'.format(epoch + 1))
+	def __init__(self):
+		super(DiceScoreCallback, self).__init__()
+		self.scores = []
+		self.n_scores = 0 
+
+    def on_train_batch_end(self, batch, logs=None):
+		if logs is not None:
+			self.scores.append(logs['dice_score'])	
+			self.n_scores += 1
+		else:
+			print('logs in none in DiceScoreCallback')
+
+	def on_train_end(logs=None):
+		try:
+			print('Saving dice scores over time plot...')
+			plt.figure()
+			plt.plot(range(self.n_scores), self.scores, 'r', label='Batch-averaged dice score')
+			plt.title('Training Batch-Averaged Dice Score')
+			plt.xlabel('Iteration')
+			plt.ylabel('Dice Score')
+			plt.ylim([0, 1])
+			plt.legend()
+			plt.savefig("dice_scores.png")
+		except Exception as e:
+			print('Could not save dice scores over time plot.')
+			print(str(e))
+			
 
 class DiceScore(tf.keras.metrics.Metric):
 
@@ -248,7 +271,10 @@ class GeneralizedDiceLoss(tf.keras.losses.Loss):
 
         return one_hot
 
-def main():
+
+### MAIN FUNCTION TO TRAIN MODEL ###
+
+if __name__ == '__main__':
 
 	gpus = tf.config.list_physical_devices('GPU')
 	if gpus:
@@ -293,33 +319,34 @@ def main():
 	STEPS_PER_EPOCH = TRAIN_LENGTH // BATCH_SIZE
 	VAL_STEPS = VAL_LENGTH // BATCH_SIZE 
 
-	print("STEPS PER EPOCH")
-	print(STEPS_PER_EPOCH)
+	print("STEPS PER EPOCH", STEPS_PER_EPOCH)
+	print('BATCH SIZE', BATCH_SIZE)
+	print('EPOCHS', EPOCHS)
 
 
-	model = MSNet("test_msnet")
+	### NAME THIS PROPERLY!!! ###
+	model = MSNet("wnet")
 
 	model.compile(optimizer=tf.keras.optimizers.Adam(lr=1e-3),
 				  loss=GeneralizedDiceLoss(),
 				  metrics=[DiceScore()],
 				  run_eagerly=True)
 
-	# tf.keras.utils.plot_model(model, show_shapes=True)
 
 	model_history = model.fit(train_dataset,
-								  epochs=EPOCHS,
-								  steps_per_epoch=STEPS_PER_EPOCH,
-								  validation_data=val_dataset,
-								  validation_steps=VAL_STEPS,
-								  validation_freq=1)
+							  epochs=EPOCHS,
+							  steps_per_epoch=STEPS_PER_EPOCH,
+							  validation_data=val_dataset,
+							  validation_steps=VAL_STEPS,
+							  validation_freq=2,
+							  callbacks=[DiceScoreCallback()])
 
 
-	tf.saved_model.save(model, "tf_MSNet_v2")
-	#model.save("test")
+	model.save_weights('saved_weights.h5', save_format='h5')
+	tf.saved_model.save(model, "saved_model")
 
 	loss = model_history.history['loss']
 	val_loss = model_history.history['val_loss']
-
 	epochs = range(EPOCHS)
 
 	plt.figure()
@@ -331,19 +358,3 @@ def main():
 	plt.ylim([0, 1])
 	plt.legend()
 	plt.savefig("tf_model_v2_loss.png")
-
-
-    # Visualize a patch
-    # viz = Visualize()
-
-    # for image, label in train_dataset.take(1):
-    #    print("Image shape: ", image.shape)
-    #    print("Label: ", label.shape)
-    #    print(np.nanmax(label.numpy()))
-    #
-    #    viz.multi_slice_viewer([image.numpy()[0,:,:,:,0], label.numpy()[0,:,:,:]])
-    #    plt.show()
-
-
-if __name__ == "__main__":
-    main()
