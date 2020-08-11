@@ -16,32 +16,32 @@ MODALITIES = {"t1": 0, "t1c": 1, "t2": 2, "flair": 3}
 
 class DiceScoreCallback(tf.keras.callbacks.Callback):
 
-	def __init__(self):
-		super(DiceScoreCallback, self).__init__()
-		self.scores = []
-		self.n_scores = 0 
+    def __init__(self):
+	    super(DiceScoreCallback, self).__init__()
+	    self.scores = []
+	    self.n_scores = 0 
 
     def on_train_batch_end(self, batch, logs=None):
-		if logs is not None:
-			self.scores.append(logs['dice_score'])	
-			self.n_scores += 1
-		else:
-			print('logs in none in DiceScoreCallback')
+        if logs is not None:
+            self.scores.append(logs['dice_score'])	
+            self.n_scores += 1
+        else:
+            print('logs in none in DiceScoreCallback')
 
-	def on_train_end(logs=None):
-		try:
-			print('Saving dice scores over time plot...')
-			plt.figure()
-			plt.plot(range(self.n_scores), self.scores, 'r', label='Batch-averaged dice score')
-			plt.title('Training Batch-Averaged Dice Score')
-			plt.xlabel('Iteration')
-			plt.ylabel('Dice Score')
-			plt.ylim([0, 1])
-			plt.legend()
-			plt.savefig("dice_scores.png")
-		except Exception as e:
-			print('Could not save dice scores over time plot.')
-			print(str(e))
+    def on_train_end(logs=None):
+        try:
+            print('Saving dice scores over time plot...')
+            plt.figure()
+            plt.plot(range(self.n_scores), self.scores, 'r', label='Batch-averaged dice score')
+            plt.title('Training Batch-Averaged Dice Score')
+            plt.xlabel('Iteration')
+            plt.ylabel('Dice Score')
+            plt.ylim([0, 1])
+            plt.legend()
+            plt.savefig("dice_scores.png")
+        except Exception as e:
+            print('Could not save dice scores over time plot.')
+            print(str(e))
 			
 
 class DiceScore(tf.keras.metrics.Metric):
@@ -340,7 +340,6 @@ if __name__ == '__main__':
 							  validation_steps=VAL_STEPS,
 							  validation_freq=2,
 							  callbacks=[DiceScoreCallback()])
-
 
 	model.save_weights('saved_weights.h5', save_format='h5')
 	tf.saved_model.save(model, "saved_model")
