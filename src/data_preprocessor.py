@@ -14,8 +14,8 @@ BUFFER_SIZE = 385
 # Right now, the smaller label patch will be centered along the same center point as
 # the image patch. So the label patch will be missing what's left over from the image patch
 # on either side equally.
-IMG_PATCH_SIZE = [19, 98, 98, 4]  # [depth, height, width, channels]
-LABEL_PATCH_SIZE = [11, 98, 98, 1]  # [depth, height, width, channels]
+IMG_PATCH_SIZE = [19, 124, 124, 4]  # [depth, height, width, channels]
+LABEL_PATCH_SIZE = [11, 124, 124, 1]  # [depth, height, width, channels]
 
 # These are correct order. Obtained from Coursera.
 MODALITIES = {"flair": 0, "t1": 1, "t1c": 2, "t2": 3}
